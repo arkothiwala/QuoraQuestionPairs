@@ -13,11 +13,13 @@ import numpy as np
 from gensim.models import KeyedVectors
 import re
 from nltk.corpus import stopwords
-from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn as sns
 from textblob import TextBlob
 import os
+import zipfile
+
+from keras.preprocessing.sequence import pad_sequences
 
 import itertools
 import datetime
@@ -26,6 +28,13 @@ import datetime
 #############################
 #------- Get the Data -------
 #############################
+
+def unzipFiles():
+    with zipfile.ZipFile("../data/train.zip") as file:
+        file.extract("train.csv","../data/")
+    with zipfile.ZipFile("../pickles/processed_data.zip") as file:
+        file.extract("processed_data.pkl","../data/")
+    
 
 def getTrainingData():
     TRAIN_CSV = os.getcwd() + '\\train.csv'
@@ -45,10 +54,75 @@ def read_glove_vecs(glove_file):
             word_to_vec_map[line[0]] = np.array(line[1:], dtype=np.float64)
     return word_to_vec_map
 
+class dataHandling(object):
+    def __init__(self, DataFrameObjArray):
+        # Expected DataFrameObjArray is a list of dataframe objects
+        self.trainData = None
+        self.valData = None
+        self.testData = None
+        if(type(DataFrameObjArray) == list):
+            if(len(DataFrameObjArray) > 0):
+                self.trainData = DataFrameObjArray[0]
+                if(len(DataFrameObjArray) == 2):
+                    self.testData = DataFrameObjArray[-1]
+                elif(len(DataFrameObjArray) == 3):
+                    self.testData = DataFrameObjArray[-1]
+                    self.valData = DataFrameObjArray[1]
+                else:
+                    print("Only Training, validation and test split is supported")
+            else:
+                print("Empty Array")
+        
+        # Check if the passed object is of dataframe type
+        elif(type(DataFrameObjArray) == pd.core.frame.DataFrame):
+            self.trainData = DataFrameObjArray
+            
+        else:
+            print("Unsupported parameter is passed to DataHandling class")        
+    
+    # Function to read Glove Vectors from stanford dataset
+    def read_glove_vecs(self, glove_file):
+        with open(glove_file, 'r',encoding="utf8") as f:
+            word_to_vec_map = {}
+            for line in f:
+                line = line.split()
+                word_to_vec_map[line[0]] = np.array(line[1:], dtype=np.float64)
+        return word_to_vec_map
+    
+    # fraction example = [0.8, 0.2] for training and validation data split
+    # fraction example = [0.8, 0.1, 0.1] for training, validation and test data split
+    def splitTrainingData(self, fractions): # Expected datatype of fractions is list of float
+        trainDataLen = len(self.trainData)
+        self.trainData = self.trainData[:int(fractions[0]*trainDataLen)]
+        if(len(fractions) == 2):
+            if(self.testData != None):
+                # Required data split is Training-Validation data split
+                self.valData = self.trainData[-int(fractions[1]*len(self.trainData)):]
+            else:
+                # Required data split is Training-Test data split
+                self.testData = self.trainData[-int(fractions[1]*len(self.trainData)):]
+        elif(len(fractions) == 3):
+            if(self.testData == None):
+                self.valData = self.trainData[int(fractions[0]*trainDataLen):int((fractions[0]+fractions[1])*trainDataLen)]
+                self.testData = self.trainData[-int(fractions[2]*trainDataLen):]
+            else:
+                # Required data split is Training-Test data split
+                print("operation not posible as test data already exist")
+        
+    def processData(self):
+        preprocess = preprocessing()
+        self.trainData = preprocess.processDataset(self.trainData) if self.trainData != None else None
+        self.valData = preprocess.processDataset(self.valData) if self.valData != None else None
+        self.testData = preprocess.processDataset(self.testData) if self.testData != None else None
+        
+        self.trainData = preprocess.padDataset(self.trainData, max_seq_length = 40)
+        self.valData = preprocess.padDataset(self.valData, max_seq_length = 40)
+        self.testData = preprocess.padDataset(self.testData, max_seq_length = 40)
+            
 class preprocessing(object):
     def __init__(self):
         self.count = 0
-        self.vocabulary = dict() # the idea is to represent each key (word) by an integer value
+        self.vocabulary = dict()  # the idea is to represent each key (word) by an integer value
         
     # Maximum time is consumed in this function in data preprocessing
     def text_to_word_list(self, text):
@@ -141,25 +215,11 @@ class preprocessing(object):
             pd.to_pickle(data,processedData_path)
             return data
         
-
-# Replace questions as word to question as number representation
-data.set_value(index, question, q)
-
-
-vocabulary = dict()                     # the idea is to represent each key (word) by an integer value
-stops = set(stopwords.words('english')) # Stop words in any questions won't be taken in to account
-count = 0
-count1 = 0
-import time
-start_time = time.time()
-# Iterate over each question from entire dataset
-for index, row in data.iterrows():
-    for question in 'question1', 'question2':
-        # Process question and represent as an array of numbers
-        processedQuestion = self.processSentence(row[question], stops)
-        # Replace questions with its processed representation
-        data.set_value(index, question, processedQuestion)
-    count1 += 1
-    if(count1%1000 == 0):
-        print(count1, "Time required: ", time.time() - start_time)
-        start_time = time.time()
+    def padDataset(self,data,max_seq_length):
+        data.question1 = pad_sequences(data.question1, maxlen=max_seq_length)
+        data.question2 = pad_sequences(data.question2, maxlen=max_seq_length)
+        # Make sure everything is ok
+        assert data.question1.shape == data.question2.shape
+        assert len(data.question1) == len(data.is_duplicate)
+        return data
+        
