@@ -33,7 +33,7 @@ def unzipFiles():
     with zipfile.ZipFile("../data/train.zip") as file:
         file.extract("train.csv","../data/")
     with zipfile.ZipFile("../pickles/processed_data.zip") as file:
-        file.extract("processed_data.pkl","../data/")
+        file.extract("processed_data.pkl","../pickles/")
     
 
 def getTrainingData():
